@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background-color: #F5F8FC;
+    color: #172B4D;
+    overflow-x: hidden;
+  }
+
+  code, pre, .font-mono {
+    font-family: 'JetBrains Mono', 'Inter', monospace;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Level 1 Card Elevation from DESIGN.md */
+.scada-card {
+  background-color: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 3px 0 rgba(21, 52, 91, 0.04), 0 1px 2px -1px rgba(21, 52, 91, 0.03);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.scada-card:hover {
+  border-color: #CBD5E1;
+  box-shadow: 0 4px 6px -1px rgba(21, 52, 91, 0.07), 0 2px 4px -2px rgba(21, 52, 91, 0.05);
+}
+
+/* Level 3 Modal Elevation from DESIGN.md */
+.scada-modal {
+  background-color: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 0.75rem;
+  box-shadow: 0 20px 25px -5px rgba(21, 52, 91, 0.1), 0 8px 10px -6px rgba(21, 52, 91, 0.06);
+}
+
+/* Clean Industrial Scrollbar for Light SCADA Theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #eff4ff;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbdbf5;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #829dca;
+}
