@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
 
 @layer base {
   body {
@@ -38,6 +39,48 @@
   border: 1px solid #E2E8F0;
   border-radius: 0.75rem;
   box-shadow: 0 20px 25px -5px rgba(21, 52, 91, 0.1), 0 8px 10px -6px rgba(21, 52, 91, 0.06);
+}
+
+/* Leaflet SCADA Light Theme Customization */
+.leaflet-container {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: #eff4ff;
+  outline: none;
+}
+
+.leaflet-popup-content-wrapper {
+  background-color: #FFFFFF;
+  color: #172B4D;
+  border: 1px solid #E2E8F0;
+  border-radius: 0.5rem;
+  box-shadow: 0 10px 15px -3px rgba(21, 52, 91, 0.1), 0 4px 6px -4px rgba(21, 52, 91, 0.05);
+  padding: 0;
+}
+
+.leaflet-popup-content {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.leaflet-popup-tip {
+  background-color: #FFFFFF;
+  border: 1px solid #E2E8F0;
+}
+
+/* Pulse animation for active SCADA markers */
+@keyframes scada-marker-pulse {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+.scada-pulse-ring {
+  animation: scada-marker-pulse 2s cubic-bezier(0.24, 0, 0.38, 1) infinite;
 }
 
 /* Clean Industrial Scrollbar for Light SCADA Theme */

@@ -49,46 +49,58 @@ const DEFAULT_MQTT_CONFIG: MqttBrokerConfig = {
 
 // Preset GIS coordinates for auto-discovered or newly added prototypes
 const GIS_SLOT_POSITIONS: Array<{
-  mapX: number;
-  mapY: number;
+  latitude: number;
+  longitude: number;
   substationName: string;
   bayName: string;
   coordinatesText: string;
+  mapX: number;
+  mapY: number;
 }> = [
   {
-    mapX: 170,
-    mapY: 110,
+    latitude: -6.9844,
+    longitude: 110.3625,
     substationName: 'GI 150kV Krapyak Semarang',
     bayName: 'Bay-01 Penghantar',
     coordinatesText: '6°59′04″S 110°21′45″E',
+    mapX: 170,
+    mapY: 110,
   },
   {
-    mapX: 370,
-    mapY: 72,
+    latitude: -7.0033,
+    longitude: 110.4417,
     substationName: 'GI 150kV Pandean Lamper',
     bayName: 'Bay-02 Trafo',
     coordinatesText: '7°00′12″S 110°26′30″E',
+    mapX: 370,
+    mapY: 72,
   },
   {
-    mapX: 340,
-    mapY: 162,
+    latitude: -7.1392,
+    longitude: 110.4050,
     substationName: 'GI 150kV Ungaran',
     bayName: 'Bay-03 Kopel',
     coordinatesText: '7°08′21″S 110°24′18″E',
+    mapX: 340,
+    mapY: 162,
   },
   {
-    mapX: 495,
-    mapY: 115,
+    latitude: -6.4475,
+    longitude: 110.7431,
     substationName: 'GI 150kV Tanjung Jati',
     bayName: 'Bay-04 Feeder',
-    coordinatesText: '6°57′40″S 110°29′10″E',
+    coordinatesText: '6°26′51″S 110°44′35″E',
+    mapX: 495,
+    mapY: 115,
   },
   {
-    mapX: 115,
-    mapY: 168,
+    latitude: -6.9550,
+    longitude: 110.2525,
     substationName: 'GI 150kV Kaliwungu',
     bayName: 'Bay-05 Distribusi',
     coordinatesText: '6°57′18″S 110°15′09″E',
+    mapX: 115,
+    mapY: 168,
   },
 ];
 
@@ -116,10 +128,15 @@ function createInitialHistory(): TelemetryHistoryPoint[] {
   return pts;
 }
 
+export { isSameNode, extractNodeFromTopic } from '../utils/sentinelNodeUtils';
+import { isSameNode, extractNodeFromTopic } from '../utils/sentinelNodeUtils';
+
 export interface AddPrototypeInput {
   nodeId: string;
   substationName: string;
   bayName: string;
+  latitude?: number;
+  longitude?: number;
   coordinatesText?: string;
 }
 
@@ -133,6 +150,8 @@ export function useSentinelTelemetry() {
       nodeId: 'SENTINEL-X-01',
       substationName: GIS_SLOT_POSITIONS[0].substationName,
       bayName: GIS_SLOT_POSITIONS[0].bayName,
+      latitude: GIS_SLOT_POSITIONS[0].latitude,
+      longitude: GIS_SLOT_POSITIONS[0].longitude,
       coordinatesText: GIS_SLOT_POSITIONS[0].coordinatesText,
       mapX: GIS_SLOT_POSITIONS[0].mapX,
       mapY: GIS_SLOT_POSITIONS[0].mapY,
@@ -141,6 +160,24 @@ export function useSentinelTelemetry() {
       lastSeenLabel: 'MENUNGGU...',
       packetsCount: 0,
       telemetry: INITIAL_TELEMETRY,
+    },
+    {
+      nodeId: 'SENTINEL-X-02',
+      substationName: GIS_SLOT_POSITIONS[1].substationName,
+      bayName: GIS_SLOT_POSITIONS[1].bayName,
+      latitude: GIS_SLOT_POSITIONS[1].latitude,
+      longitude: GIS_SLOT_POSITIONS[1].longitude,
+      coordinatesText: GIS_SLOT_POSITIONS[1].coordinatesText,
+      mapX: GIS_SLOT_POSITIONS[1].mapX,
+      mapY: GIS_SLOT_POSITIONS[1].mapY,
+      connected: false,
+      lastSeenMs: null,
+      lastSeenLabel: 'MENUNGGU...',
+      packetsCount: 0,
+      telemetry: {
+        ...INITIAL_TELEMETRY,
+        node: 'SENTINEL-X-02',
+      },
     },
   ]);
 
@@ -153,6 +190,7 @@ export function useSentinelTelemetry() {
   );
   const [historyByNode, setHistoryByNode] = useState<Record<string, TelemetryHistoryPoint[]>>(() => ({
     'SENTINEL-X-01': createInitialHistory(),
+    'SENTINEL-X-02': createInitialHistory(),
   }));
 
   const [logs, setLogs] = useState<AuditLogEntry[]>(() => [
@@ -176,7 +214,10 @@ export function useSentinelTelemetry() {
 
   // Refs for mutable access inside MQTT callbacks
   const mqttClientRef = useRef<MqttClient | null>(null);
-  const relayTripByNodeRef = useRef<Record<string, boolean>>({ 'SENTINEL-X-01': false });
+  const relayTripByNodeRef = useRef<Record<string, boolean>>({
+    'SENTINEL-X-01': false,
+    'SENTINEL-X-02': false,
+  });
   // Holds software cut-off lock when user clicks TRIP/RESET so in-flight 500ms telemetry doesn't revert UI
   const commandOverrideByNodeRef = useRef<
     Record<string, { desiredTrip: boolean; timestampMs: number }>
@@ -198,19 +239,19 @@ export function useSentinelTelemetry() {
     activeNodeIdRef.current = activeNodeId;
   }, [activeNodeId]);
 
-  // Liveness checker: mark ESP32 node as offline if no telemetry received for > 10 seconds
+  // Liveness checker: mark ESP32 node as offline if no telemetry received for > 30 seconds
   useEffect(() => {
     const interval = setInterval(() => {
       const now = Date.now();
       setPrototypes((prev) =>
         prev.map((node) => {
-          if (node.connected && node.lastSeenMs && now - node.lastSeenMs > 10000) {
+          if (node.connected && node.lastSeenMs && now - node.lastSeenMs > 30000) {
             return { ...node, connected: false };
           }
           return node;
         })
       );
-    }, 3000);
+    }, 4000);
     return () => clearInterval(interval);
   }, []);
 
@@ -236,20 +277,6 @@ export function useSentinelTelemetry() {
     []
   );
 
-  // Extract nodeId from topic if missing in payload (e.g., sentinelx/SENTINEL-X-02/telemetry)
-  const extractNodeFromTopic = (topic: string): string | null => {
-    const parts = topic.split('/');
-    if (parts.length >= 3 && parts[0] === 'sentinelx') {
-      if (parts[1] === 'daniyal' && parts.length >= 4) {
-        return parts[2];
-      }
-      if (parts[1] !== '+' && parts[1] !== 'command') {
-        return parts[1];
-      }
-    }
-    return null;
-  };
-
   // Unified packet ingestion handler for MQTT
   const ingestTelemetryPayload = useCallback(
     (payload: SentinelTelemetryPayload, topicOrPort: string, rawString?: string) => {
@@ -257,7 +284,12 @@ export function useSentinelTelemetry() {
       const tick = tickCounterRef.current;
 
       const topicNode = extractNodeFromTopic(topicOrPort);
-      const nodeId = (payload.node || topicNode || mqttConfigRef.current.nodeId || 'SENTINEL-X-01').trim();
+      // Prioritize topicNode over payload.node.
+      // Why: Prototype 2 firmware commonly has hardcoded `doc["node"] = "SENTINEL-X-01"` in its JSON body,
+      // but correctly publishes to `sentinelx/SENTINEL-X-02/telemetry`.
+      // Using topicNode first prevents Prototype 2 packets from being mistakenly attributed to Prototype 1.
+      const resolvedNodeId = (topicNode || payload.node || mqttConfigRef.current.nodeId || 'SENTINEL-X-01').trim();
+      const nodeId = resolvedNodeId.toUpperCase();
 
       const normalizedMetrics: SentinelMetrics = {
         I_rms: Number(payload.metrics?.I_rms ?? 4.25),
@@ -318,17 +350,19 @@ export function useSentinelTelemetry() {
 
       // Update or auto-register this ESP32 prototype in `prototypes`
       setPrototypes((prev) => {
-        const existingIdx = prev.findIndex((p) => p.nodeId === nodeId);
+        const existingIdx = prev.findIndex((p) => isSameNode(p.nodeId, nodeId));
         if (existingIdx >= 0) {
           const updated = [...prev];
           const existing = updated[existingIdx];
+          const canonicalNodeId = existing.nodeId;
+          const finalPayload: SentinelTelemetryPayload = { ...cleanPayload, node: canonicalNodeId };
           updated[existingIdx] = {
             ...existing,
             connected: true,
             lastSeenMs: nowMs,
             lastSeenLabel: formattedTime,
             packetsCount: existing.packetsCount + 1,
-            telemetry: cleanPayload,
+            telemetry: finalPayload,
           };
           return updated;
         } else {
@@ -337,6 +371,8 @@ export function useSentinelTelemetry() {
             nodeId,
             substationName: slot.substationName,
             bayName: `Bay-0${prev.length + 1}`,
+            latitude: slot.latitude,
+            longitude: slot.longitude,
             coordinatesText: slot.coordinatesText,
             mapX: slot.mapX,
             mapY: slot.mapY,
@@ -353,7 +389,8 @@ export function useSentinelTelemetry() {
       const healthScore = computeSystemHealth(cleanPayload.ai_engine.threat_idx);
 
       setHistoryByNode((prev) => {
-        const nodeHistory = prev[nodeId] || createInitialHistory();
+        const existingKey = Object.keys(prev).find((k) => isSameNode(k, nodeId)) || nodeId;
+        const nodeHistory = prev[existingKey] || createInitialHistory();
         const nextPoint: TelemetryHistoryPoint = {
           timestamp: timeLabel,
           timeMs: nowMs,
@@ -367,7 +404,7 @@ export function useSentinelTelemetry() {
         };
         return {
           ...prev,
-          [nodeId]: [...nodeHistory.slice(-59), nextPoint],
+          [existingKey]: [...nodeHistory.slice(-59), nextPoint],
         };
       });
 
@@ -375,8 +412,8 @@ export function useSentinelTelemetry() {
       setLastPacketTime(formattedTime);
 
       // Update primary view if this packet belongs to the currently selected prototype
-      if (nodeId === activeNodeIdRef.current) {
-        setTelemetry(cleanPayload);
+      if (isSameNode(nodeId, activeNodeIdRef.current)) {
+        setTelemetry({ ...cleanPayload, node: activeNodeIdRef.current });
         setTensorState(evalResult.tensor);
         setFftSpectrum(
           generateFFTSpectrum(normalizedMetrics.vib_g, cleanPayload.ai_engine.class, tick)
@@ -411,7 +448,8 @@ export function useSentinelTelemetry() {
       rawString?: string
     ) => {
       const tripped = Boolean(eventObj.relay_trip);
-      const topicNode = extractNodeFromTopic(topicOrPort) || activeNodeIdRef.current;
+      const topicNode =
+        extractNodeFromTopic(topicOrPort) || activeNodeIdRef.current || 'SENTINEL-X-01';
 
       relayTripByNodeRef.current[topicNode] = tripped;
       commandOverrideByNodeRef.current[topicNode] = {
@@ -421,13 +459,13 @@ export function useSentinelTelemetry() {
 
       setPrototypes((prev) =>
         prev.map((p) =>
-          p.nodeId === topicNode
+          isSameNode(p.nodeId, topicNode)
             ? { ...p, telemetry: { ...p.telemetry, relay_trip: tripped } }
             : p
         )
       );
 
-      if (topicNode === activeNodeIdRef.current) {
+      if (isSameNode(topicNode, activeNodeIdRef.current)) {
         setTelemetry((prev) => ({
           ...prev,
           relay_trip: tripped,
@@ -452,6 +490,11 @@ export function useSentinelTelemetry() {
       const trimmed = rawLine.trim();
       if (!trimmed) return;
 
+      // Filter out command echoes from wildcard subscriptions (e.g. sentinelx/<NODE>/command)
+      if (topic.endsWith('/command') || topic.includes('/command/')) {
+        return;
+      }
+
       if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
         try {
           const parsed = JSON.parse(trimmed);
@@ -465,9 +508,70 @@ export function useSentinelTelemetry() {
               );
               return;
             }
-            if ('metrics' in parsed && 'ai_engine' in parsed) {
+            const hasNestedMetrics = 'metrics' in parsed;
+            const hasFlatMetrics =
+              'I_rms' in parsed ||
+              'i_rms' in parsed ||
+              'gas_ppm' in parsed ||
+              'vib_g' in parsed ||
+              'threat_idx' in parsed;
+
+            if (hasNestedMetrics || hasFlatMetrics || 'ai_engine' in parsed) {
+              const incomingNode =
+                parsed.node || parsed.nodeId || parsed.node_id || parsed.id;
+              const normalizedPayload: SentinelTelemetryPayload = {
+                node: incomingNode,
+                metrics: hasNestedMetrics
+                  ? {
+                      I_rms: Number(
+                        parsed.metrics?.I_rms ??
+                          parsed.metrics?.i_rms ??
+                          parsed.metrics?.irms ??
+                          4.25
+                      ),
+                      gas_ppm: Number(
+                        parsed.metrics?.gas_ppm ??
+                          parsed.metrics?.gas ??
+                          parsed.metrics?.gasPpm ??
+                          45.0
+                      ),
+                      vib_g: Number(
+                        parsed.metrics?.vib_g ??
+                          parsed.metrics?.vib ??
+                          parsed.metrics?.vibG ??
+                          0.0124
+                      ),
+                      bus_secure: Boolean(
+                        parsed.metrics?.bus_secure ??
+                          parsed.metrics?.secure ??
+                          parsed.metrics?.busSecure ??
+                          true
+                      ),
+                    }
+                  : {
+                      I_rms: Number(
+                        parsed.I_rms ?? parsed.i_rms ?? parsed.irms ?? 4.25
+                      ),
+                      gas_ppm: Number(
+                        parsed.gas_ppm ?? parsed.gas ?? parsed.gasPpm ?? 45.0
+                      ),
+                      vib_g: Number(
+                        parsed.vib_g ?? parsed.vib ?? parsed.vibG ?? 0.0124
+                      ),
+                      bus_secure: Boolean(
+                        parsed.bus_secure ??
+                          parsed.secure ??
+                          parsed.busSecure ??
+                          true
+                      ),
+                    },
+                ai_engine: parsed.ai_engine,
+                status: parsed.status,
+                relay_trip: Boolean(parsed.relay_trip ?? parsed.trip ?? false),
+              };
+
               ingestTelemetryPayload(
-                parsed as SentinelTelemetryPayload,
+                normalizedPayload,
                 topic,
                 trimmed
               );
@@ -536,7 +640,7 @@ export function useSentinelTelemetry() {
         setTelemetry((prev) => ({ ...prev, relay_trip: true }));
         setPrototypes((prev) =>
           prev.map((p) =>
-            p.nodeId === targetNode
+            isSameNode(p.nodeId, targetNode)
               ? { ...p, telemetry: { ...p.telemetry, relay_trip: true } }
               : p
           )
@@ -562,7 +666,7 @@ export function useSentinelTelemetry() {
         setTelemetry((prev) => ({ ...prev, relay_trip: false }));
         setPrototypes((prev) =>
           prev.map((p) =>
-            p.nodeId === targetNode
+            isSameNode(p.nodeId, targetNode)
               ? { ...p, telemetry: { ...p.telemetry, relay_trip: false } }
               : p
           )
@@ -591,11 +695,12 @@ export function useSentinelTelemetry() {
   // Select active prototype node to view/control
   const selectNode = useCallback(
     (nodeId: string) => {
-      setActiveNodeId(nodeId);
-      activeNodeIdRef.current = nodeId;
+      const cleanNodeId = nodeId.trim().toUpperCase();
+      setActiveNodeId(cleanNodeId);
+      activeNodeIdRef.current = cleanNodeId;
 
       setPrototypes((prev) => {
-        const found = prev.find((p) => p.nodeId === nodeId);
+        const found = prev.find((p) => isSameNode(p.nodeId, cleanNodeId));
         if (found) {
           setTelemetry(found.telemetry);
           const evalRes = evaluateTinyMLInt8(found.telemetry.metrics);
@@ -613,11 +718,24 @@ export function useSentinelTelemetry() {
 
       setMqttConfig((prev) => ({
         ...prev,
-        nodeId,
-        subscribeTelemetryTopic: `sentinelx/${nodeId}/telemetry`,
-        subscribeEventTopic: `sentinelx/${nodeId}/event`,
-        publishCommandTopic: `sentinelx/${nodeId}/command`,
+        nodeId: cleanNodeId,
+        subscribeTelemetryTopic: `sentinelx/${cleanNodeId}/telemetry`,
+        subscribeEventTopic: `sentinelx/${cleanNodeId}/event`,
+        publishCommandTopic: `sentinelx/${cleanNodeId}/command`,
       }));
+
+      // Ensure MQTT subscription for the selected node
+      if (mqttClientRef.current && mqttClientRef.current.connected) {
+        mqttClientRef.current.subscribe(
+          [
+            `sentinelx/${cleanNodeId}/telemetry`,
+            `sentinelx/${cleanNodeId}/event`,
+            `sentinelx/daniyal/${cleanNodeId}/telemetry`,
+            `sentinelx/daniyal/${cleanNodeId}/event`,
+          ],
+          { qos: 0 }
+        );
+      }
     },
     []
   );
@@ -629,20 +747,49 @@ export function useSentinelTelemetry() {
       if (!cleanId) return;
 
       setPrototypes((prev) => {
-        const existingIdx = prev.findIndex((p) => p.nodeId === cleanId);
+        const existingIdx = prev.findIndex((p) => isSameNode(p.nodeId, cleanId));
         if (existingIdx >= 0) {
           const updated = [...prev];
+          const lat =
+            input.latitude !== undefined && !isNaN(Number(input.latitude))
+              ? Number(input.latitude)
+              : updated[existingIdx].latitude;
+          const lng =
+            input.longitude !== undefined && !isNaN(Number(input.longitude))
+              ? Number(input.longitude)
+              : updated[existingIdx].longitude;
+          const latDir = lat < 0 ? 'S' : 'N';
+          const lngDir = lng < 0 ? 'W' : 'E';
+          const coordsLabel =
+            input.coordinatesText?.trim() ||
+            `${Math.abs(lat).toFixed(4)}°${latDir} ${Math.abs(lng).toFixed(4)}°${lngDir}`;
+
           updated[existingIdx] = {
             ...updated[existingIdx],
             substationName: input.substationName.trim() || updated[existingIdx].substationName,
             bayName: input.bayName.trim() || updated[existingIdx].bayName,
-            coordinatesText:
-              input.coordinatesText?.trim() || updated[existingIdx].coordinatesText,
+            latitude: lat,
+            longitude: lng,
+            coordinatesText: coordsLabel,
           };
           return updated;
         }
 
         const slot = GIS_SLOT_POSITIONS[prev.length % GIS_SLOT_POSITIONS.length];
+        const lat =
+          input.latitude !== undefined && !isNaN(Number(input.latitude))
+            ? Number(input.latitude)
+            : slot.latitude;
+        const lng =
+          input.longitude !== undefined && !isNaN(Number(input.longitude))
+            ? Number(input.longitude)
+            : slot.longitude;
+        const latDir = lat < 0 ? 'S' : 'N';
+        const lngDir = lng < 0 ? 'W' : 'E';
+        const coordsLabel =
+          input.coordinatesText?.trim() ||
+          `${Math.abs(lat).toFixed(4)}°${latDir} ${Math.abs(lng).toFixed(4)}°${lngDir}`;
+
         const newPayload: SentinelTelemetryPayload = {
           ...INITIAL_TELEMETRY,
           node: cleanId,
@@ -651,7 +798,9 @@ export function useSentinelTelemetry() {
           nodeId: cleanId,
           substationName: input.substationName.trim() || slot.substationName,
           bayName: input.bayName.trim() || `Bay-0${prev.length + 1}`,
-          coordinatesText: input.coordinatesText?.trim() || slot.coordinatesText,
+          latitude: lat,
+          longitude: lng,
+          coordinatesText: coordsLabel,
           mapX: slot.mapX,
           mapY: slot.mapY,
           connected: false,
@@ -664,14 +813,20 @@ export function useSentinelTelemetry() {
       });
 
       setHistoryByNode((prev) => {
-        if (prev[cleanId]) return prev;
+        const existingKey = Object.keys(prev).find((k) => isSameNode(k, cleanId));
+        if (existingKey) return prev;
         return { ...prev, [cleanId]: createInitialHistory() };
       });
 
       // Subscribe to the new node's topics if MQTT is connected
       if (mqttClientRef.current && mqttClientRef.current.connected) {
         mqttClientRef.current.subscribe(
-          [`sentinelx/${cleanId}/telemetry`, `sentinelx/${cleanId}/event`],
+          [
+            `sentinelx/${cleanId}/telemetry`,
+            `sentinelx/${cleanId}/event`,
+            `sentinelx/daniyal/${cleanId}/telemetry`,
+            `sentinelx/daniyal/${cleanId}/event`,
+          ],
           { qos: 0 }
         );
       }
@@ -694,8 +849,8 @@ export function useSentinelTelemetry() {
     (nodeId: string) => {
       setPrototypes((prev) => {
         if (prev.length <= 1) return prev;
-        const filtered = prev.filter((p) => p.nodeId !== nodeId);
-        if (activeNodeIdRef.current === nodeId && filtered.length > 0) {
+        const filtered = prev.filter((p) => !isSameNode(p.nodeId, nodeId));
+        if (isSameNode(activeNodeIdRef.current, nodeId) && filtered.length > 0) {
           const nextNode = filtered[0];
           setActiveNodeId(nextNode.nodeId);
           activeNodeIdRef.current = nextNode.nodeId;
@@ -705,6 +860,50 @@ export function useSentinelTelemetry() {
       });
     },
     []
+  );
+
+  // Update real geographical coordinates (Latitude & Longitude) for an existing prototype
+  const updatePrototypeCoordinates = useCallback(
+    (
+      nodeId: string,
+      latitude: number,
+      longitude: number,
+      substationName?: string,
+      bayName?: string
+    ) => {
+      const lat = Number(latitude);
+      const lng = Number(longitude);
+      if (isNaN(lat) || isNaN(lng)) return;
+
+      const latDir = lat < 0 ? 'S' : 'N';
+      const lngDir = lng < 0 ? 'W' : 'E';
+      const coordsLabel = `${Math.abs(lat).toFixed(4)}°${latDir} ${Math.abs(lng).toFixed(4)}°${lngDir}`;
+
+      setPrototypes((prev) =>
+        prev.map((p) => {
+          if (isSameNode(p.nodeId, nodeId)) {
+            return {
+              ...p,
+              latitude: lat,
+              longitude: lng,
+              coordinatesText: coordsLabel,
+              substationName: substationName?.trim() || p.substationName,
+              bayName: bayName?.trim() || p.bayName,
+            };
+          }
+          return p;
+        })
+      );
+
+      appendLog(
+        'SYS',
+        'SCADA',
+        `GIS//COORDS`,
+        `Koordinat ${nodeId} berhasil diperbarui: Lintang ${lat}, Bujur ${lng} (${coordsLabel})`,
+        'emerald'
+      );
+    },
+    [appendLog]
   );
 
   // Auto-Trip Policy evaluation whenever threat_idx exceeds 75
@@ -772,10 +971,20 @@ export function useSentinelTelemetry() {
             new Set([
               cfg.subscribeTelemetryTopic.trim(),
               cfg.subscribeEventTopic.trim(),
+              'sentinelx/#',
+              'sentinel-x/#',
               'sentinelx/+/telemetry',
               'sentinelx/+/event',
+              'sentinelx/+/data',
+              'sentinelx/daniyal/#',
               'sentinelx/daniyal/+/telemetry',
               'sentinelx/daniyal/+/event',
+              'sentinelx/SENTINEL-X-01/telemetry',
+              'sentinelx/SENTINEL-X-02/telemetry',
+              'sentinelx/SENTINEL-X-01/event',
+              'sentinelx/SENTINEL-X-02/event',
+              'sentinelx/daniyal/SENTINEL-X-01/telemetry',
+              'sentinelx/daniyal/SENTINEL-X-02/telemetry',
             ].filter(Boolean))
           );
 
@@ -848,7 +1057,9 @@ export function useSentinelTelemetry() {
   }, []);
 
   const systemHealthScore = computeSystemHealth(telemetry.ai_engine.threat_idx);
-  const history = historyByNode[activeNodeId] || createInitialHistory();
+  const activeHistoryKey =
+    Object.keys(historyByNode).find((k) => isSameNode(k, activeNodeId)) || activeNodeId;
+  const history = historyByNode[activeHistoryKey] || createInitialHistory();
 
   return {
     telemetry,
@@ -874,5 +1085,6 @@ export function useSentinelTelemetry() {
     selectNode,
     addPrototype,
     removePrototype,
+    updatePrototypeCoordinates,
   };
 }

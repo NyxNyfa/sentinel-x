@@ -30,6 +30,7 @@ Materi Bootcamp*
 .idea/
 .DS_Store
 Thumbs.db
+~$*
 *.suo
 *.ntvs*
 *.njsproj

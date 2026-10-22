@@ -29,6 +29,7 @@ export function App() {
     selectNode,
     addPrototype,
     removePrototype,
+    updatePrototypeCoordinates,
   } = useSentinelTelemetry();
 
   return (
@@ -66,6 +67,7 @@ export function App() {
               selectNode={selectNode}
               addPrototype={addPrototype}
               removePrototype={removePrototype}
+              updatePrototypeCoordinates={updatePrototypeCoordinates}
             />
           </div>
 

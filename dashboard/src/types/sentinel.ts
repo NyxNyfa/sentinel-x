@@ -82,9 +82,11 @@ export interface PrototypeNode {
   nodeId: string;
   substationName: string;
   bayName: string;
-  coordinatesText: string;
-  mapX: number; // SVG 0..600
-  mapY: number; // SVG 0..220
+  latitude: number;
+  longitude: number;
+  coordinatesText?: string;
+  mapX?: number; // SVG 0..600 (legacy/fallback)
+  mapY?: number; // SVG 0..220 (legacy/fallback)
   connected: boolean;
   lastSeenMs: number | null;
   lastSeenLabel: string;

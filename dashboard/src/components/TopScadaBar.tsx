@@ -20,7 +20,7 @@ import type {
   PrototypeNode,
   SentinelTelemetryPayload,
 } from '../types/sentinel';
-import type { AddPrototypeInput } from '../hooks/useSentinelTelemetry';
+import { isSameNode, type AddPrototypeInput } from '../hooks/useSentinelTelemetry';
 
 interface TopScadaBarProps {
   telemetry: SentinelTelemetryPayload;
@@ -72,13 +72,14 @@ export const TopScadaBar: React.FC<TopScadaBarProps> = ({
   const [newNodeId, setNewNodeId] = useState('');
   const [newSubstation, setNewSubstation] = useState('');
   const [newBay, setNewBay] = useState('');
-  const [newCoords, setNewCoords] = useState('');
+  const [newLat, setNewLat] = useState<string>('-6.9844');
+  const [newLng, setNewLng] = useState<string>('110.3625');
 
   const isAlert = telemetry.status === 'EVENT_ALERT' || telemetry.ai_engine.threat_idx > 55;
   const isTripped = telemetry.relay_trip;
 
   const activePrototype =
-    prototypes.find((p) => p.nodeId === activeNodeId) || prototypes[0];
+    prototypes.find((p) => isSameNode(p.nodeId, activeNodeId)) || prototypes[0];
   const connectedCount = prototypes.filter((p) => p.connected).length;
 
   const handleConnectBroker = (e: React.FormEvent) => {
@@ -93,18 +94,22 @@ export const TopScadaBar: React.FC<TopScadaBarProps> = ({
     setNewNodeId(`SENTINEL-X-0${nextIdx}`);
     setNewSubstation(`GI 150kV Gardu-${nextIdx}`);
     setNewBay(`Bay-0${nextIdx}`);
-    setNewCoords('7°00′12″S 110°26′30″E');
+    setNewLat('-7.0033');
+    setNewLng('110.4417');
     setShowAddNodeModal(true);
   };
 
   const handleAddPrototypeSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newNodeId.trim()) return;
+    const lat = Number(newLat);
+    const lng = Number(newLng);
     addPrototype({
       nodeId: newNodeId,
       substationName: newSubstation || 'Gardu Induk 150kV',
       bayName: newBay || 'Bay-01',
-      coordinatesText: newCoords || '6°59′04″S 110°21′45″E',
+      latitude: !isNaN(lat) ? lat : -6.9844,
+      longitude: !isNaN(lng) ? lng : 110.3625,
     });
     setShowAddNodeModal(false);
   };
@@ -194,7 +199,9 @@ export const TopScadaBar: React.FC<TopScadaBarProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-sm font-bold text-[#0b1c30]">{telemetry.node}</span>
+                <span className="text-sm font-bold text-[#0b1c30]">
+                  {activePrototype?.nodeId || telemetry.node}
+                </span>
                 <span className="text-xs text-[#64748B]">
                   ({activePrototype?.substationName || 'GI 150kV Semarang'} •{' '}
                   {activePrototype?.bayName || 'Bay-01'})
@@ -203,20 +210,37 @@ export const TopScadaBar: React.FC<TopScadaBarProps> = ({
                   className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold uppercase tracking-[0.04em] ${
                     activePrototype?.connected
                       ? 'bg-[#16A34A]/10 text-[#16A34A]'
-                      : 'bg-[#64748B]/10 text-[#64748B]'
+                      : (activePrototype?.packetsCount ?? 0) > 0
+                        ? 'bg-[#D97706]/10 text-[#D97706]'
+                        : 'bg-[#64748B]/10 text-[#64748B]'
                   }`}
                 >
                   <span
                     className={`w-1.5 h-1.5 rounded-full ${
-                      activePrototype?.connected ? 'bg-[#16A34A]' : 'bg-[#94A3B8]'
+                      activePrototype?.connected
+                        ? 'bg-[#16A34A]'
+                        : (activePrototype?.packetsCount ?? 0) > 0
+                          ? 'bg-[#D97706]'
+                          : 'bg-[#94A3B8]'
                     }`}
                   />
-                  {activePrototype?.connected ? 'ESP32 ONLINE' : 'MENUNGGU TELEMETRI'}
+                  {activePrototype?.connected
+                    ? 'ESP32 ONLINE'
+                    : (activePrototype?.packetsCount ?? 0) > 0
+                      ? 'ESP32 OFFLINE'
+                      : 'MENUNGGU TELEMETRI'}
                 </span>
               </div>
               <p className="text-xs text-[#64748B] tabular-nums mt-0.5">
-                Update Terakhir: <strong className="text-[#172B4D]">{lastPacketTime}</strong> • Daya Node:{' '}
-                <strong className="text-[#172B4D]">1.18 W</strong> • Efisiensi Bandwidth:{' '}
+                Update Terakhir:{' '}
+                <strong className="text-[#172B4D]">
+                  {activePrototype?.lastSeenLabel && activePrototype.lastSeenLabel !== 'MENUNGGU...'
+                    ? activePrototype.lastSeenLabel
+                    : activePrototype?.connected
+                      ? lastPacketTime
+                      : 'MENUNGGU TELEMETRI'}
+                </strong>{' '}
+                • Daya Node: <strong className="text-[#172B4D]">1.18 W</strong> • Efisiensi Bandwidth:{' '}
                 <strong className="text-[#006972]">&gt; 85.4%</strong>
               </p>
             </div>
@@ -235,7 +259,13 @@ export const TopScadaBar: React.FC<TopScadaBarProps> = ({
               >
                 {prototypes.map((p) => (
                   <option key={p.nodeId} value={p.nodeId}>
-                    {p.nodeId} ({p.connected ? 'Online' : 'Menunggu'})
+                    {p.nodeId} (
+                    {p.connected
+                      ? 'Online'
+                      : p.packetsCount > 0
+                        ? 'Offline'
+                        : 'Menunggu'}
+                    )
                   </option>
                 ))}
               </select>
@@ -562,30 +592,47 @@ export const TopScadaBar: React.FC<TopScadaBarProps> = ({
                   />
                 </div>
 
+                <div>
+                  <label className="block text-[#172B4D] font-semibold mb-1">
+                    Unit / Bay
+                  </label>
+                  <input
+                    type="text"
+                    value={newBay}
+                    onChange={(e) => setNewBay(e.target.value)}
+                    placeholder="Contoh: Bay-02"
+                    className="w-full h-9 px-3 rounded bg-white border border-[#E2E8F0] text-[#172B4D] focus:outline-none focus:border-[#16B8C8]"
+                    required
+                  />
+                </div>
+
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-[#172B4D] font-semibold mb-1">
-                      Unit / Bay
+                      Garis Lintang (Latitude)
                     </label>
                     <input
-                      type="text"
-                      value={newBay}
-                      onChange={(e) => setNewBay(e.target.value)}
-                      placeholder="Contoh: Bay-02"
-                      className="w-full h-9 px-3 rounded bg-white border border-[#E2E8F0] text-[#172B4D] focus:outline-none focus:border-[#16B8C8]"
+                      type="number"
+                      step="any"
+                      value={newLat}
+                      onChange={(e) => setNewLat(e.target.value)}
+                      placeholder="-6.9844"
+                      className="w-full h-9 px-3 rounded bg-white border border-[#E2E8F0] text-[#172B4D] font-mono focus:outline-none focus:border-[#16B8C8]"
                       required
                     />
                   </div>
                   <div>
                     <label className="block text-[#172B4D] font-semibold mb-1">
-                      Koordinat GIS
+                      Garis Bujur (Longitude)
                     </label>
                     <input
-                      type="text"
-                      value={newCoords}
-                      onChange={(e) => setNewCoords(e.target.value)}
-                      placeholder="7°00′12″S 110°26′30″E"
+                      type="number"
+                      step="any"
+                      value={newLng}
+                      onChange={(e) => setNewLng(e.target.value)}
+                      placeholder="110.3625"
                       className="w-full h-9 px-3 rounded bg-white border border-[#E2E8F0] text-[#172B4D] font-mono focus:outline-none focus:border-[#16B8C8]"
+                      required
                     />
                   </div>
                 </div>

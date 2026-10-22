@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AreaChart,
   Area,
@@ -25,6 +26,8 @@ import {
   Cpu,
   Check,
   X,
+  Edit2,
+  Compass,
 } from 'lucide-react';
 import type {
   FFTBin,
@@ -32,7 +35,8 @@ import type {
   SentinelTelemetryPayload,
   TelemetryHistoryPoint,
 } from '../types/sentinel';
-import type { AddPrototypeInput } from '../hooks/useSentinelTelemetry';
+import { isSameNode, type AddPrototypeInput } from '../hooks/useSentinelTelemetry';
+import { RealGisMap } from './RealGisMap';
 
 interface MultiModalChartsModuleProps {
   telemetry: SentinelTelemetryPayload;
@@ -44,6 +48,13 @@ interface MultiModalChartsModuleProps {
   selectNode: (nodeId: string) => void;
   addPrototype: (input: AddPrototypeInput) => void;
   removePrototype: (nodeId: string) => void;
+  updatePrototypeCoordinates: (
+    nodeId: string,
+    latitude: number,
+    longitude: number,
+    substationName?: string,
+    bayName?: string
+  ) => void;
 }
 
 export const MultiModalChartsModule: React.FC<MultiModalChartsModuleProps> = ({
@@ -56,12 +67,25 @@ export const MultiModalChartsModule: React.FC<MultiModalChartsModuleProps> = ({
   selectNode,
   addPrototype,
   removePrototype,
+  updatePrototypeCoordinates,
 }) => {
   const [activeTab, setActiveTab] = useState<'telemetry' | 'fft' | 'gis'>('telemetry');
+
+  // Inline Add Prototype state in GIS tab
   const [showInlineAdd, setShowInlineAdd] = useState(false);
   const [nodeIdInput, setNodeIdInput] = useState('');
   const [substationInput, setSubstationInput] = useState('');
   const [bayInput, setBayInput] = useState('');
+  const [latInput, setLatInput] = useState('-6.9844');
+  const [lngInput, setLngInput] = useState('110.3625');
+  const [pickModeActive, setPickModeActive] = useState(false);
+
+  // Edit Prototype Coordinates Modal state
+  const [editingNode, setEditingNode] = useState<PrototypeNode | null>(null);
+  const [editLat, setEditLat] = useState<string>('');
+  const [editLng, setEditLng] = useState<string>('');
+  const [editSubstation, setEditSubstation] = useState<string>('');
+  const [editBay, setEditBay] = useState<string>('');
 
   const { I_rms, gas_ppm, vib_g, bus_secure } = telemetry.metrics;
   const isVib48Hz =
@@ -75,18 +99,65 @@ export const MultiModalChartsModule: React.FC<MultiModalChartsModuleProps> = ({
     setNodeIdInput(`SENTINEL-X-0${nextNum}`);
     setSubstationInput(`GI 150kV Gardu-${nextNum}`);
     setBayInput(`Bay-0${nextNum}`);
+    setLatInput('-7.0033');
+    setLngInput('110.4417');
     setShowInlineAdd(true);
+    setPickModeActive(true);
   };
 
   const handleInlineAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!nodeIdInput.trim()) return;
+    const lat = Number(latInput);
+    const lng = Number(lngInput);
     addPrototype({
       nodeId: nodeIdInput,
       substationName: substationInput || 'Gardu Induk 150kV',
       bayName: bayInput || 'Bay-01',
+      latitude: !isNaN(lat) ? lat : -6.9844,
+      longitude: !isNaN(lng) ? lng : 110.3625,
     });
     setShowInlineAdd(false);
+    setPickModeActive(false);
+  };
+
+  // Called when clicking anywhere on the RealGisMap
+  const handleMapPickCoordinates = (lat: number, lng: number) => {
+    if (editingNode) {
+      setEditLat(lat.toString());
+      setEditLng(lng.toString());
+    } else if (showInlineAdd) {
+      setLatInput(lat.toString());
+      setLngInput(lng.toString());
+    }
+  };
+
+  // Open Edit Coordinates modal
+  const handleOpenEditModal = (prototype: PrototypeNode) => {
+    setEditingNode(prototype);
+    setEditLat(prototype.latitude.toString());
+    setEditLng(prototype.longitude.toString());
+    setEditSubstation(prototype.substationName);
+    setEditBay(prototype.bayName);
+    setPickModeActive(true);
+  };
+
+  const handleSaveEditCoordinates = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingNode) return;
+    const lat = Number(editLat);
+    const lng = Number(editLng);
+    if (!isNaN(lat) && !isNaN(lng)) {
+      updatePrototypeCoordinates(
+        editingNode.nodeId,
+        lat,
+        lng,
+        editSubstation,
+        editBay
+      );
+    }
+    setEditingNode(null);
+    setPickModeActive(false);
   };
 
   return (
@@ -292,8 +363,8 @@ export const MultiModalChartsModule: React.FC<MultiModalChartsModuleProps> = ({
                   : 'text-[#64748B] hover:text-[#172B4D]'
               }`}
             >
-              <MapPin className="w-3.5 h-3.5" />
-              <span>Peta GIS Gardu ({prototypes.length})</span>
+              <MapPin className="w-3.5 h-3.5 text-[#006972]" />
+              <span>Peta Real GIS ({prototypes.length})</span>
             </button>
           </div>
         </div>
@@ -531,220 +602,165 @@ export const MultiModalChartsModule: React.FC<MultiModalChartsModuleProps> = ({
           </div>
         )}
 
-        {/* TAB 3: Dynamic Multi-Prototype GIS Substation Map */}
+        {/* TAB 3: Real GIS OpenStreetMap Indonesia Map with Custom Coordinates */}
         {activeTab === 'gis' && (
           <div className="space-y-4">
             <div className="rounded-lg bg-[#F5F8FC] border border-[#E2E8F0] p-4">
               <div className="flex flex-wrap items-center justify-between gap-2 mb-3 text-xs">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-[#172B4D] font-semibold">
-                    Topologi GIS Gardu Induk (Sesuai Prototype ESP32)
+                  <span className="text-[#172B4D] font-semibold flex items-center gap-1.5">
+                    <Compass className="w-4 h-4 text-[#006972]" />
+                    Peta Real GIS Gardu Induk (OpenStreetMap Indonesia)
                   </span>
                   <span className="px-2 py-0.5 rounded bg-[#eff4ff] border border-[#d3e4fe] text-[#15345B] font-semibold tabular-nums">
                     {connectedCount} Online / {prototypes.length} Terdaftar
                   </span>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleOpenInlineAdd}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#15345B] hover:bg-[#001f40] text-white font-semibold cursor-pointer transition-colors"
-                >
-                  <Plus className="w-3.5 h-3.5 text-[#67ecfd]" />
-                  <span>Tambah Prototype ESP32</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleOpenInlineAdd}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#15345B] hover:bg-[#001f40] text-white font-semibold cursor-pointer transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-[#67ecfd]" />
+                    <span>Tambah Prototype</span>
+                  </button>
+                </div>
               </div>
 
-              {/* Inline Add Prototype Form inside GIS Tab */}
+              {/* Inline Add Prototype Form with Lat/Lng Manual Input */}
               {showInlineAdd && (
                 <form
                   onSubmit={handleInlineAddSubmit}
-                  className="mb-4 p-3.5 rounded-lg bg-white border border-[#d3e4fe] grid grid-cols-1 sm:grid-cols-4 gap-2.5 items-end text-xs"
+                  className="mb-4 p-4 rounded-lg bg-white border border-[#d3e4fe] shadow-xs text-xs space-y-3 animate-in fade-in"
                 >
-                  <div>
-                    <label className="block text-[11px] font-semibold text-[#64748B] mb-1">
-                      Node ID ESP32
-                    </label>
-                    <input
-                      type="text"
-                      value={nodeIdInput}
-                      onChange={(e) => setNodeIdInput(e.target.value)}
-                      placeholder="SENTINEL-X-02"
-                      className="w-full h-8 px-2.5 rounded border border-[#E2E8F0] font-mono font-semibold text-[#172B4D] focus:outline-none focus:border-[#16B8C8]"
-                      required
-                    />
+                  <div className="flex items-center justify-between pb-2 border-b border-[#E2E8F0]">
+                    <span className="font-semibold text-[#15345B] flex items-center gap-1.5">
+                      <Plus className="w-4 h-4 text-[#006972]" />
+                      Tambah Prototype Baru (Input Manual Garis Lintang &amp; Bujur)
+                    </span>
+                    <span className="text-[11px] text-[#64748B]">
+                      *Anda juga dapat mengklik langsung peta di bawah untuk mengisi titik koordinat
+                    </span>
                   </div>
-                  <div>
-                    <label className="block text-[11px] font-semibold text-[#64748B] mb-1">
-                      Nama Gardu Induk
-                    </label>
-                    <input
-                      type="text"
-                      value={substationInput}
-                      onChange={(e) => setSubstationInput(e.target.value)}
-                      placeholder="GI 150kV Pandean"
-                      className="w-full h-8 px-2.5 rounded border border-[#E2E8F0] text-[#172B4D] focus:outline-none focus:border-[#16B8C8]"
-                      required
-                    />
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#64748B] mb-1">
+                        Node ID ESP32
+                      </label>
+                      <input
+                        type="text"
+                        value={nodeIdInput}
+                        onChange={(e) => setNodeIdInput(e.target.value)}
+                        placeholder="SENTINEL-X-02"
+                        className="w-full h-8 px-2.5 rounded border border-[#E2E8F0] font-mono font-semibold text-[#172B4D] focus:outline-none focus:border-[#16B8C8]"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#64748B] mb-1">
+                        Nama Gardu Induk
+                      </label>
+                      <input
+                        type="text"
+                        value={substationInput}
+                        onChange={(e) => setSubstationInput(e.target.value)}
+                        placeholder="GI 150kV Pandean"
+                        className="w-full h-8 px-2.5 rounded border border-[#E2E8F0] text-[#172B4D] focus:outline-none focus:border-[#16B8C8]"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#64748B] mb-1">
+                        Unit / Bay
+                      </label>
+                      <input
+                        type="text"
+                        value={bayInput}
+                        onChange={(e) => setBayInput(e.target.value)}
+                        placeholder="Bay-02"
+                        className="w-full h-8 px-2.5 rounded border border-[#E2E8F0] text-[#172B4D] focus:outline-none focus:border-[#16B8C8]"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#64748B] mb-1">
+                        Garis Lintang (Latitude)
+                      </label>
+                      <input
+                        type="number"
+                        step="any"
+                        value={latInput}
+                        onChange={(e) => setLatInput(e.target.value)}
+                        placeholder="-6.9844"
+                        className="w-full h-8 px-2.5 rounded border border-[#E2E8F0] font-mono font-semibold text-[#15345B] focus:outline-none focus:border-[#16B8C8]"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#64748B] mb-1">
+                        Garis Bujur (Longitude)
+                      </label>
+                      <input
+                        type="number"
+                        step="any"
+                        value={lngInput}
+                        onChange={(e) => setLngInput(e.target.value)}
+                        placeholder="110.3625"
+                        className="w-full h-8 px-2.5 rounded border border-[#E2E8F0] font-mono font-semibold text-[#15345B] focus:outline-none focus:border-[#16B8C8]"
+                        required
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-[11px] font-semibold text-[#64748B] mb-1">
-                      Unit Bay
-                    </label>
-                    <input
-                      type="text"
-                      value={bayInput}
-                      onChange={(e) => setBayInput(e.target.value)}
-                      placeholder="Bay-02"
-                      className="w-full h-8 px-2.5 rounded border border-[#E2E8F0] text-[#172B4D] focus:outline-none focus:border-[#16B8C8]"
-                      required
-                    />
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="submit"
-                      className="flex-1 h-8 px-3 rounded bg-[#16A34A] hover:bg-[#15803d] text-white font-semibold flex items-center justify-center gap-1 cursor-pointer"
-                    >
-                      <Check className="w-3.5 h-3.5" />
-                      <span>Simpan</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowInlineAdd(false)}
-                      className="h-8 px-2.5 rounded bg-[#F8FAFC] hover:bg-[#E2E8F0] border border-[#E2E8F0] text-[#64748B] cursor-pointer"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
+
+                  <div className="flex items-center justify-between pt-2">
+                    <span className="text-[11px] font-mono text-[#006972]">
+                      Titik Peta: [{Number(latInput).toFixed(4)}, {Number(lngInput).toFixed(4)}]
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowInlineAdd(false)}
+                        className="px-3 h-8 rounded bg-[#F8FAFC] hover:bg-[#E2E8F0] border border-[#E2E8F0] text-[#64748B] font-semibold cursor-pointer"
+                      >
+                        Batal
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-4 h-8 rounded bg-[#16A34A] hover:bg-[#15803d] text-white font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Simpan Prototype</span>
+                      </button>
+                    </div>
                   </div>
                 </form>
               )}
 
-              {/* Dynamic SVG GIS Topology Map */}
-              <svg
-                viewBox="0 0 600 220"
-                className="w-full h-56 rounded-lg bg-[#eff4ff] border border-[#d3e4fe]"
-              >
-                <defs>
-                  <pattern id="lightGisGrid" width="30" height="30" patternUnits="userSpaceOnUse">
-                    <path
-                      d="M 30 0 L 0 0 0 30"
-                      fill="none"
-                      stroke="#cbdbf5"
-                      strokeWidth="0.8"
-                    />
-                  </pattern>
-                </defs>
-                <rect width="600" height="220" fill="url(#lightGisGrid)" />
-
-                {/* Dynamic Transmission Links between registered ESP32 prototypes */}
-                {prototypes.length > 1 &&
-                  prototypes.map((node, idx) => {
-                    if (idx === 0) return null;
-                    const prevNode = prototypes[idx - 1];
-                    const anyAlert =
-                      node.telemetry.relay_trip ||
-                      node.telemetry.status === 'EVENT_ALERT' ||
-                      prevNode.telemetry.relay_trip ||
-                      prevNode.telemetry.status === 'EVENT_ALERT';
-                    return (
-                      <line
-                        key={`link-${prevNode.nodeId}-${node.nodeId}`}
-                        x1={prevNode.mapX}
-                        y1={prevNode.mapY}
-                        x2={node.mapX}
-                        y2={node.mapY}
-                        stroke={anyAlert ? '#DC2626' : '#16B8C8'}
-                        strokeWidth="2.5"
-                        strokeDasharray={node.connected && prevNode.connected ? undefined : '5 4'}
-                      />
-                    );
-                  })}
-
-                {/* Render each registered/connected ESP32 prototype node */}
-                {prototypes.map((node) => {
-                  const isSelected = node.nodeId === activeNodeId;
-                  const nodeAlert =
-                    node.telemetry.relay_trip ||
-                    node.telemetry.status === 'EVENT_ALERT' ||
-                    node.telemetry.ai_engine.threat_idx > 55;
-                  const fillColor = nodeAlert
-                    ? '#DC2626'
-                    : node.connected
-                      ? '#16A34A'
-                      : '#15345B';
-
-                  return (
-                    <g
-                      key={node.nodeId}
-                      onClick={() => selectNode(node.nodeId)}
-                      className="cursor-pointer"
-                    >
-                      {(isSelected || node.connected) && (
-                        <circle
-                          cx={node.mapX}
-                          cy={node.mapY}
-                          r={22}
-                          fill="none"
-                          stroke={fillColor}
-                          strokeWidth="2"
-                          opacity="0.6"
-                        >
-                          <animate
-                            attributeName="r"
-                            values="10;30;10"
-                            dur="2.4s"
-                            repeatCount="indefinite"
-                          />
-                        </circle>
-                      )}
-                      <circle
-                        cx={node.mapX}
-                        cy={node.mapY}
-                        r={isSelected ? 8 : 6.5}
-                        fill={fillColor}
-                        stroke="#FFFFFF"
-                        strokeWidth="2.5"
-                      />
-                      <text
-                        x={node.mapX}
-                        y={node.mapY - 16}
-                        textAnchor="middle"
-                        fill="#0b1c30"
-                        fontSize="11"
-                        fontWeight="bold"
-                        fontFamily="Inter"
-                      >
-                        {node.nodeId} ({node.substationName})
-                      </text>
-                      <text
-                        x={node.mapX}
-                        y={node.mapY + 22}
-                        textAnchor="middle"
-                        fill={nodeAlert ? '#DC2626' : node.connected ? '#16A34A' : '#64748B'}
-                        fontSize="10"
-                        fontWeight="600"
-                        fontFamily="JetBrains Mono, monospace"
-                      >
-                        {node.telemetry.relay_trip
-                          ? 'CUT-OFF AKTIF'
-                          : node.connected
-                            ? `ONLINE • ${node.telemetry.metrics.I_rms.toFixed(1)}A • Threat ${node.telemetry.ai_engine.threat_idx}%`
-                            : `${node.bayName} • MENUNGGU ESP32`}
-                      </text>
-                    </g>
-                  );
-                })}
-              </svg>
+              {/* Real Leaflet Map of Indonesia with Real Coordinates */}
+              <RealGisMap
+                prototypes={prototypes}
+                activeNodeId={activeNodeId}
+                selectNode={selectNode}
+                onPickCoordinates={handleMapPickCoordinates}
+                pickModeActive={pickModeActive}
+                onOpenEditCoordsModal={handleOpenEditModal}
+              />
             </div>
 
-            {/* Registered Prototype Nodes Cards */}
+            {/* Registered Prototype Nodes Cards with Coordinates & Edit Button */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {prototypes.map((node) => {
-                const isSelected = node.nodeId === activeNodeId;
+                const isSelected = isSameNode(node.nodeId, activeNodeId);
                 const nodeAlert =
                   node.telemetry.relay_trip ||
                   node.telemetry.status === 'EVENT_ALERT' ||
                   node.telemetry.ai_engine.threat_idx > 55;
+
+                const latLabel = `${Math.abs(node.latitude).toFixed(4)}°${node.latitude < 0 ? 'S' : 'N'}`;
+                const lngLabel = `${Math.abs(node.longitude).toFixed(4)}°${node.longitude < 0 ? 'W' : 'E'}`;
 
                 return (
                   <div
@@ -752,7 +768,7 @@ export const MultiModalChartsModule: React.FC<MultiModalChartsModuleProps> = ({
                     onClick={() => selectNode(node.nodeId)}
                     className={`p-3.5 rounded-lg border transition-all cursor-pointer flex items-center justify-between gap-3 ${
                       isSelected
-                        ? 'bg-[#eff4ff] border-[#15345B]'
+                        ? 'bg-[#eff4ff] border-[#15345B] shadow-xs'
                         : 'bg-white border-[#E2E8F0] hover:border-[#CBD5E1]'
                     }`}
                   >
@@ -763,7 +779,9 @@ export const MultiModalChartsModule: React.FC<MultiModalChartsModuleProps> = ({
                             ? 'bg-[#DC2626]/10 border-[#DC2626]/30 text-[#DC2626]'
                             : node.connected
                               ? 'bg-[#16A34A]/10 border-[#16A34A]/30 text-[#16A34A]'
-                              : 'bg-[#F5F8FC] border-[#E2E8F0] text-[#64748B]'
+                              : node.packetsCount > 0
+                                ? 'bg-[#D97706]/10 border-[#D97706]/30 text-[#D97706]'
+                                : 'bg-[#F5F8FC] border-[#E2E8F0] text-[#64748B]'
                         }`}
                       >
                         <Cpu className="w-4 h-4" />
@@ -777,10 +795,16 @@ export const MultiModalChartsModule: React.FC<MultiModalChartsModuleProps> = ({
                             className={`px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase ${
                               node.connected
                                 ? 'bg-[#16A34A]/15 text-[#16A34A]'
-                                : 'bg-[#64748B]/15 text-[#64748B]'
+                                : node.packetsCount > 0
+                                  ? 'bg-[#D97706]/15 text-[#D97706]'
+                                  : 'bg-[#64748B]/15 text-[#64748B]'
                             }`}
                           >
-                            {node.connected ? 'ONLINE' : 'OFFLINE / MENUNGGU'}
+                            {node.connected
+                              ? 'ONLINE'
+                              : node.packetsCount > 0
+                                ? 'OFFLINE'
+                                : 'MENUNGGU'}
                           </span>
                           {isSelected && (
                             <span className="px-1.5 py-0.5 rounded bg-[#15345B] text-white text-[10px] font-semibold">
@@ -789,7 +813,10 @@ export const MultiModalChartsModule: React.FC<MultiModalChartsModuleProps> = ({
                           )}
                         </div>
                         <div className="text-xs text-[#64748B] truncate mt-0.5">
-                          {node.substationName} • {node.bayName} ({node.coordinatesText})
+                          {node.substationName} • {node.bayName}
+                        </div>
+                        <div className="text-[11px] font-mono text-[#006972] font-semibold mt-0.5 tabular-nums">
+                          📍 Lat: {node.latitude} ({latLabel}) | Lng: {node.longitude} ({lngLabel})
                         </div>
                         <div className="text-[11px] font-mono text-[#172B4D] mt-1 tabular-nums">
                           I_rms: {node.telemetry.metrics.I_rms.toFixed(2)}A | Gas:{' '}
@@ -799,19 +826,35 @@ export const MultiModalChartsModule: React.FC<MultiModalChartsModuleProps> = ({
                       </div>
                     </div>
 
-                    {prototypes.length > 1 && (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {/* Edit Coordinates Button */}
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          removePrototype(node.nodeId);
+                          handleOpenEditModal(node);
                         }}
-                        className="p-1.5 rounded bg-white hover:bg-[#ffdad6]/40 border border-[#E2E8F0] text-[#64748B] hover:text-[#DC2626] transition-colors cursor-pointer shrink-0"
-                        title={`Hapus ${node.nodeId}`}
+                        className="p-1.5 rounded bg-white hover:bg-[#F1F5F9] border border-[#E2E8F0] text-[#15345B] hover:border-[#15345B] transition-colors cursor-pointer"
+                        title={`Edit Titik Garis Lintang & Bujur ${node.nodeId}`}
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Edit2 className="w-3.5 h-3.5" />
                       </button>
-                    )}
+
+                      {/* Remove Prototype Button */}
+                      {prototypes.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removePrototype(node.nodeId);
+                          }}
+                          className="p-1.5 rounded bg-white hover:bg-[#ffdad6]/40 border border-[#E2E8F0] text-[#64748B] hover:text-[#DC2626] transition-colors cursor-pointer shrink-0"
+                          title={`Hapus ${node.nodeId}`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -819,6 +862,132 @@ export const MultiModalChartsModule: React.FC<MultiModalChartsModuleProps> = ({
           </div>
         )}
       </div>
+
+      {/* Edit Coordinates Modal rendered via Portal */}
+      {editingNode &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto"
+            style={{ backgroundColor: 'rgba(21, 52, 91, 0.45)' }}
+            onClick={() => setEditingNode(null)}
+          >
+            <div
+              className="scada-modal w-full max-w-md my-auto overflow-hidden text-[#172B4D]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-6 py-4 bg-[#15345B] text-white flex items-center justify-between">
+                <div className="flex items-center gap-2.5 text-sm font-semibold">
+                  <MapPin className="w-4 h-4 text-[#67ecfd]" />
+                  <span>Edit Titik Koordinat ({editingNode.nodeId})</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditingNode(null)}
+                  className="text-[#d5e3ff] hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveEditCoordinates} className="p-6 space-y-4 text-xs bg-white">
+                <p className="text-[#64748B] leading-relaxed">
+                  Masukkan nilai titik <strong>Garis Lintang (Latitude)</strong> dan{' '}
+                  <strong>Garis Bujur (Longitude)</strong> dalam format desimal untuk wilayah Indonesia.
+                </p>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[#172B4D] font-semibold mb-1">
+                      Garis Lintang (Latitude)
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={editLat}
+                      onChange={(e) => setEditLat(e.target.value)}
+                      placeholder="-6.9844"
+                      className="w-full h-9 px-3 rounded bg-white border border-[#E2E8F0] font-mono text-[#15345B] font-semibold focus:outline-none focus:border-[#16B8C8]"
+                      required
+                    />
+                    <span className="text-[10px] text-[#64748B] mt-0.5 block">
+                      Negatif (-) untuk Lintang Selatan
+                    </span>
+                  </div>
+                  <div>
+                    <label className="block text-[#172B4D] font-semibold mb-1">
+                      Garis Bujur (Longitude)
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={editLng}
+                      onChange={(e) => setEditLng(e.target.value)}
+                      placeholder="110.3625"
+                      className="w-full h-9 px-3 rounded bg-white border border-[#E2E8F0] font-mono text-[#15345B] font-semibold focus:outline-none focus:border-[#16B8C8]"
+                      required
+                    />
+                    <span className="text-[10px] text-[#64748B] mt-0.5 block">
+                      Positif (+) untuk Bujur Timur
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[#172B4D] font-semibold mb-1">
+                    Nama Gardu Induk
+                  </label>
+                  <input
+                    type="text"
+                    value={editSubstation}
+                    onChange={(e) => setEditSubstation(e.target.value)}
+                    placeholder="GI 150kV Krapyak Semarang"
+                    className="w-full h-9 px-3 rounded bg-white border border-[#E2E8F0] text-[#172B4D] focus:outline-none focus:border-[#16B8C8]"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[#172B4D] font-semibold mb-1">
+                    Unit / Bay
+                  </label>
+                  <input
+                    type="text"
+                    value={editBay}
+                    onChange={(e) => setEditBay(e.target.value)}
+                    placeholder="Bay-01 Penghantar"
+                    className="w-full h-9 px-3 rounded bg-white border border-[#E2E8F0] text-[#172B4D] focus:outline-none focus:border-[#16B8C8]"
+                    required
+                  />
+                </div>
+
+                <div className="p-3 rounded bg-[#eff4ff] border border-[#d3e4fe] text-[11px] font-mono space-y-1">
+                  <div className="text-[#15345B] font-semibold">Preview Koordinat:</div>
+                  <div className="text-[#006972]">
+                    [{editLat || '0'}, {editLng || '0'}]
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#E2E8F0]">
+                  <button
+                    type="button"
+                    onClick={() => setEditingNode(null)}
+                    className="px-4 py-2 rounded bg-white hover:bg-[#F8FAFC] border border-[#E2E8F0] text-[#172B4D] font-semibold cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex items-center gap-1.5 px-4 py-2 rounded bg-[#15345B] hover:bg-[#001f40] text-white font-semibold cursor-pointer transition-colors shadow-xs"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Simpan Perubahan</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 };
