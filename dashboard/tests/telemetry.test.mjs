@@ -158,3 +158,115 @@ test('Simulated Telemetry Ingestion: Prototype 2 firmware sending node=SENTINEL-
       : 'Menunggu';
   assert.equal(p2Label, 'Offline', 'Node with packetsCount > 0 should display Offline, not Menunggu');
 });
+
+test('Transformer Diagnostic: Pillar titles updated to Sensor Arus, Sensor Gas, and Sensor Getaran', async () => {
+  const { evaluateTransformerDiagnostics } = await import('../src/utils/transformerDiagnosticEngine.ts');
+
+  const mockTelemetry = {
+    node: 'SENTINEL-X-01',
+    metrics: {
+      I_rms: 4.5,
+      gas_ppm: 40,
+      vib_g: 0.015,
+      bus_secure: true,
+    },
+    ai_engine: {
+      class: 'NOMINAL_OPERATION',
+      threat_idx: 0,
+      latency_us: 120,
+    },
+    status: 'NORMAL',
+    relay_trip: false,
+  };
+
+  const report = evaluateTransformerDiagnostics(mockTelemetry, []);
+
+  // Assert pillars are present with exact expected titles
+  const pillarTitles = report.pillars.map((p) => p.title);
+  assert.ok(pillarTitles.includes('Sensor Arus'), 'Should include Sensor Arus');
+  assert.ok(pillarTitles.includes('Sensor Gas'), 'Should include Sensor Gas');
+  assert.ok(pillarTitles.includes('Sensor Getaran'), 'Should include Sensor Getaran');
+
+  // Verify legacy titles are NOT present
+  assert.ok(!pillarTitles.includes('Kapasitas Beban & Termal Belitan'), 'Legacy load title should be absent');
+  assert.ok(!pillarTitles.includes('Isolasi Minyak & Gas (DGA)'), 'Legacy gas title should be absent');
+  assert.ok(!pillarTitles.includes('Struktur Mekanis & Bearing 48Hz'), 'Legacy vibration title should be absent');
+
+  // Verify health calculation directly reflects real telemetry metrics without simulation overrides
+  assert.ok(report.overallHealthScore >= 90, 'Nominal metrics should yield healthy score');
+  assert.equal(report.urgency, 'NORMAL');
+
+  // Test edge case: critical gas spike
+  const criticalGasTelemetry = {
+    ...mockTelemetry,
+    metrics: { ...mockTelemetry.metrics, gas_ppm: 550 },
+  };
+  const spikeReport = evaluateTransformerDiagnostics(criticalGasTelemetry, []);
+  assert.equal(spikeReport.urgency, 'CRITICAL_SHUTDOWN');
+  assert.equal(spikeReport.recommendShutdownTrip, true);
+  const gasPillar = spikeReport.pillars.find((p) => p.title === 'Sensor Gas');
+  assert.equal(gasPillar.level, 'critical');
+  assert.equal(gasPillar.currentValueText, '550 ppm');
+
+  // Test edge case: overload current
+  const overloadTelemetry = {
+    ...mockTelemetry,
+    metrics: { ...mockTelemetry.metrics, I_rms: 18.5 },
+  };
+  const overloadReport = evaluateTransformerDiagnostics(overloadTelemetry, []);
+  assert.equal(overloadReport.urgency, 'CRITICAL_SHUTDOWN');
+  const currentPillar = overloadReport.pillars.find((p) => p.title === 'Sensor Arus');
+  assert.equal(currentPillar.level, 'critical');
+  assert.equal(currentPillar.currentValueText, '18.50 A');
+
+  // Test edge case: bearing vibration anomaly
+  const vibTelemetry = {
+    ...mockTelemetry,
+    metrics: { ...mockTelemetry.metrics, vib_g: 0.35 },
+  };
+  const vibReport = evaluateTransformerDiagnostics(vibTelemetry, []);
+  assert.equal(vibReport.urgency, 'CRITICAL_SHUTDOWN');
+  const vibPillar = vibReport.pillars.find((p) => p.title === 'Sensor Getaran');
+  assert.equal(vibPillar.level, 'critical');
+  assert.equal(vibPillar.currentValueText, '0.3500 g');
+
+  // Test edge case: perimeter physical security sabotage
+  const sabotageTelemetry = {
+    ...mockTelemetry,
+    metrics: { ...mockTelemetry.metrics, bus_secure: false },
+  };
+  const sabotageReport = evaluateTransformerDiagnostics(sabotageTelemetry, []);
+  assert.equal(sabotageReport.urgency, 'CRITICAL_SHUTDOWN');
+  assert.equal(sabotageReport.recommendShutdownTrip, true);
+  const perimeterPillar = sabotageReport.pillars.find((p) => p.id === 'perimeter_security');
+  assert.equal(perimeterPillar.level, 'critical');
+  assert.equal(perimeterPillar.score, 15);
+
+  // Test edge case: gradual gas leak (preventive maintenance window)
+  const gradualGasTelemetry = {
+    ...mockTelemetry,
+    metrics: { ...mockTelemetry.metrics, gas_ppm: 150 },
+  };
+  const gradualGasReport = evaluateTransformerDiagnostics(gradualGasTelemetry, []);
+  assert.equal(gradualGasReport.urgency, 'PREVENTIVE_TREND');
+  assert.equal(gradualGasReport.recommendShutdownTrip, false);
+
+  // Test edge case: history slope triggers gradual trend detection even at moderate sensor values
+  const historyWithSpikeSlope = Array.from({ length: 20 }, (_, i) => ({
+    timestamp: '12:00:00',
+    timeMs: Date.now() + i * 1000,
+    I_rms: 4.5,
+    gas_ppm: i < 10 ? 60 : 75, // delta = +15 ppm (> 8)
+    vib_g: 0.015,
+    threat_idx: 0,
+    health_score: 90,
+    latency_us: 100,
+    bus_secure: 1,
+  }));
+  const slopeGasTelemetry = {
+    ...mockTelemetry,
+    metrics: { ...mockTelemetry.metrics, gas_ppm: 68 },
+  };
+  const slopeReport = evaluateTransformerDiagnostics(slopeGasTelemetry, historyWithSpikeSlope);
+  assert.equal(slopeReport.urgency, 'PREVENTIVE_TREND');
+});

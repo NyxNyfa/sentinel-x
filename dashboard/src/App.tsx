@@ -1,5 +1,6 @@
 import { useSentinelTelemetry } from './hooks/useSentinelTelemetry';
 import { TopScadaBar } from './components/TopScadaBar';
+import { TransformerAdvisorModule } from './components/TransformerAdvisorModule';
 import { TinyMLThreatModule } from './components/TinyMLThreatModule';
 import { MultiModalChartsModule } from './components/MultiModalChartsModule';
 import { ScadaAuditTerminal } from './components/ScadaAuditTerminal';
@@ -54,6 +55,13 @@ export function App() {
 
       {/* Main 12-Column SCADA Operational Layout on #F5F8FC Canvas */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-8 py-6 space-y-6">
+        {/* Core Intelligence Hero: AI Transformer Health & Prescriptive Recommendation Advisor */}
+        <TransformerAdvisorModule
+          telemetry={telemetry}
+          history={history}
+          sendCommand={sendCommand}
+        />
+
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* Left 8 Columns: 4 Instrumentation Cards + Tabbed Charts/GIS */}
           <div className="lg:col-span-8">
